@@ -1,0 +1,1 @@
+g++ main.cpp -o build/game.exe -O1 -std=c++11 -Wno-missing-braces -I src/ -L lib/ -lraylib -lopengl32 -lgdi32 -lwinmm
