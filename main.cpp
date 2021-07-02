@@ -1,9 +1,27 @@
 #include "raywrapper.h"
 
-#define RAYGUI_IMPLEMENTATION
-#define RAYGUI_SUPPORT_ICONS
-#include "raygui.h"
-#undef RAYGUI_IMPLEMENTATION
+#include "temp_gui.h"
+
+enum Editor_Mode_Settings
+{
+    EDITOR_MODE_GAME = 0,
+    EDITOR_MODE_UI,
+    EDITOR_MODE_DEBUG,
+    EDITOR_MODE_SETTINGS
+};
+
+enum Editor_Control_Settings
+{
+    EDITOR_CONTROL_PLAY = 0,
+    EDITOR_CONTROL_EDIT,
+    EDITOR_CONTROL_SETTINGS
+};
+
+struct Game_State
+{
+    Editor_Mode_Settings editor_Mode_Settings;
+    Editor_Control_Settings editor_Control_Settings;
+};
 
 struct System_State
 {
@@ -17,9 +35,9 @@ struct System_State
 FUNC_SIG void SystemStateSetup(System_State *system_State)
 {
     system_State->window_Title = "Game";
-    system_State->screen_Width = 1980 / 2;
-    system_State->screen_Height = 1020 / 2;
-    system_State->clear_Color = {255, 0, 255, 255}; // hot pink
+    system_State->screen_Width = 1920;
+    system_State->screen_Height = 1080;
+    system_State->clear_Color = {255, 255, 255, 255}; // hot pink
     system_State->fps = 120;
 }
 
@@ -27,7 +45,9 @@ FUNC_SIG void SetupRaylib(System_State *system_State)
 {
     InitWindow(system_State->screen_Width, system_State->screen_Height, system_State->window_Title);
     SetTargetFPS(system_State->fps);
-    
+
+    GuiLoadStyle("assets/styles/cyber/cyber.rgs");
+
     SetExitKey(0);
 }
 
@@ -36,11 +56,52 @@ FUNC_SIG void CleanupRaylib()
     CloseWindow();
 }
 
+typedef unsigned long long u64;
+typedef u64 umax;
+
+struct CharArray
+{
+    umax char_Length;
+    umax allocated_Bytes;
+    char *chars;
+};
+
+bool RemoveFront(CharArray *char_Array)
+{
+    if(char_Array->char_Length > 0)
+    {
+        --char_Array->char_Length;
+        return true;
+    }
+    return false;
+}
+
+bool IsWhiteSpace(CharArray *char_Array)
+{
+    char test = char_Array->chars[0];
+    bool result = (test == ' ') || (test == '\r') || (test == '\n') || (test == '\t') || (test == '\f') || (test == '\v');
+    return result;
+}
+
+bool AddChar(CharArray *char_Array, char token)
+{
+    if(char_Array->allocated_Bytes > char_Array->char_Length)
+    {
+        char_Array->chars[char_Array->char_Length] = token;
+        ++char_Array->char_Length;
+        return true;
+    }
+
+    return false;
+}
+
 int main(int argc, char** argv)
 {
     System_State system_State = {0};
     SystemStateSetup(&system_State);
     SetupRaylib(&system_State);
+    
+    Game_State game_State = {};
 
     Player player = { 0 };
     player.position = { 400, 280 };
@@ -56,6 +117,10 @@ int main(int argc, char** argv)
         {{ 250.0f, 300.0f, 100.0f, 10.0f }, 1, GRAY },
         {{ 650.0f, 300.0f, 100.0f, 10.0f }, 1, GRAY },
         {{ 0.0f, 0.0f, 10.0f, 500.0f }, 1, GRAY },
+        {{ 10.0f, 10.0f, 20.0f, 20.0f }, 1, BLUE },
+        {{ 20.0f, 20.0f, 20.0f, 20.0f }, 1, BLUE },
+        {{ 30.0f, 30.0f, 20.0f, 20.0f }, 1, BLUE },
+        {{ 40.0f, 40.0f, 20.0f, 20.0f }, 1, BLUE },
     };
     
     int walls_Length = sizeof(walls)/sizeof(walls[0]);
@@ -66,259 +131,443 @@ int main(int argc, char** argv)
     camera.rotation = 0.0f;
     camera.zoom = 1.0f;
 
-    Gui_Window gui_Window;
-    gui_Window.alive = true;
-    gui_Window.open = true;
-    gui_Window.title = "#198# Controls Window";
-    gui_Window.position = {0.0f, 0.0f};
-    gui_Window.rectangle = { 200, 200, system_State.screen_Width/2.0f, system_State.screen_Height/2.0f };
+    TempGui temp_Gui = {0};
+    SetupTempGui(&temp_Gui, system_State.screen_Width, system_State.screen_Height);
+    const char *temp_ListView[8] = { "This", "is", "a", "list view", "with", "disable", "elements", "amazing!" };
+    temp_Gui.listViewExList = temp_ListView;
 
-    // GUI controls initialization
-    //----------------------------------------------------------------------------------
-    int dropdownBox000Active = 0;
-    bool dropDown000EditMode = false;
+    Gui_Window editor_Window = {0};
+    InitGuiWIndow(editor_Window);
+    editor_Window.title = (char*)"#198# Editor Window";
+    editor_Window.position = { system_State.screen_Width * 0.75f, 0.0f };
+    editor_Window.rectangle = { 20.0f, 20.0f, (float)system_State.screen_Width / 2.0f, (float)system_State.screen_Height / 2.0f};
+    editor_Window.open_Size.x = editor_Window.rectangle.width;
+    editor_Window.open_Size.y = editor_Window.rectangle.height;
 
-    int dropdownBox001Active = 0;
-    bool dropDown001EditMode = false;
-
-    int spinner001Value = 0;
-    bool spinnerEditMode = false;
-
-    int valueBox002Value = 0;
-    bool valueBoxEditMode = false;
-
-    char textBoxText[64] = "Text box";
-    bool textBoxEditMode = false;
-
-    int listViewScrollIndex = 0;
-    int listViewActive = -1;
-
-    int listViewExScrollIndex = 0;
-    int listViewExActive = 2;
-    int listViewExFocus = -1;
-    const char *listViewExList[8] = { "This", "is", "a", "list view", "with", "disable", "elements", "amazing!" };
-
-    char multiTextBoxText[256] = "Multi text box";
-    bool multiTextBoxEditMode = false;
-    Color colorPickerValue = RED;
-
-    int sliderValue = 50;
-    int sliderBarValue = 60;
-    float progressValue = 0.4f;
-
-    bool forceSquaredChecked = false;
-
-    float alphaValue = 0.5f;
-
-    int comboBoxActive = 1;
-
-    int toggleGroupActive = 0;
-
-    Vector2 viewScroll = { 5, 5 };
-
-    bool exitWindow = false;
-    bool showMessageBox = false;
-
-    char textInput[256] = { 0 };
-    bool showTextInputBox = false;
-
-    char textInputFileName[256] = { 0 };
     //----------------------------------------------------------------------------------
 
     // General variables
     Vector2 mousePosition = { 0.0f, 0.0f };
-    Vector2 windowPosition = { 500.0f, 200.0f };
     Vector2 panOffset = mousePosition;
-    bool dragWindow = false;
-    bool collapseWindow = false;
-    
-    SetWindowPosition(windowPosition.x, windowPosition.y);
-    
-    bool exitNewWindow = false;
-    bool guiNewWindow = false;
 
     Vector2 touchPosition = { 0.0f, 0.0f };
-    Rectangle touchArea = { 0.0f, 0.0f, system_State.screen_Width, system_State.screen_Height };
+    Rectangle touchArea = { 0.0f, 0.0f, (float)system_State.screen_Width, (float)system_State.screen_Height };
     int currentGesture = GESTURE_NONE;
     int lastGesture = GESTURE_NONE;
 
-    bool mouseScaleReady = false;
     bool mouseScaleMode = false;
+    bool mouseScaleReady = false;
     float window_Corner = 12.0f;
-
-    Vector2 open_Size = { 0.0f, 0.0f };
-    open_Size.x = gui_Window.rectangle.width;
-    open_Size.y = gui_Window.rectangle.height;
+    
+    Rectangle active_Rect = {0};
+    float width_Corner =  0.0f;
+    float height_Corner = 0.0f;
+    bool active_ScaleReady = false;
+    bool active_ScaleMode = false;
 
     bool drag_Player = false;
+    Vector2 drag_Offset = {0};
 
     Debug_Window debug_Window = {};
-    debug_Window.alive = true;
-    //debug_Window.previousTextBox = debug_Window.allTextBox[1];
-    //debug_Window.activeTextBox = debug_Window.allTextBox[0];
-    debug_Window.previousTextBox = debug_Window.allTextBox[2];
-    debug_Window.activeTextBox = debug_Window.allTextBox[3];
-    debug_Window.command_Count = 3;
+    debug_Window.alive = false;
+    debug_Window.previousTextBox = debug_Window.allTextBox[0];
+    debug_Window.activeTextBox = debug_Window.allTextBox[0];
+    debug_Window.activeTextBox[0] = '>';
+    int frame_Counter = 0;
 
-    TextCopy(debug_Window.allTextBox[0], "THIS IS TEST 0");
-    TextCopy(debug_Window.allTextBox[1], "THIS IS TEST 1");
-    TextCopy(debug_Window.allTextBox[2], "THIS IS TEST 2");
+    CharArray command = {};
+    command.char_Length = 0;
+    command.allocated_Bytes = 512;
+    command.chars = (char*)malloc(command.allocated_Bytes * sizeof(char));
+    CharArray token = {};
+    token.char_Length = 0;
+    token.allocated_Bytes = 512;
+    token.chars = (char*)malloc(command.allocated_Bytes * sizeof(char));
+
+    Debug_Items scene_Debug_Items = {0};
+    scene_Debug_Items.item_Count = 0;
+    scene_Debug_Items.item_Hover = -1;
+    scene_Debug_Items.item_Selected = -1;
+
+    for(int i = 0; i < walls_Length; ++i)
+    {
+        scene_Debug_Items.items[scene_Debug_Items.item_Count] = { "Wall", &walls[i].rectangle, WALLS_TYPE, (char*)&walls[i] };
+        SetupDebugGuiData(&scene_Debug_Items.items[scene_Debug_Items.item_Count]);
+        ++scene_Debug_Items.item_Count;
+    }
+    scene_Debug_Items.items[scene_Debug_Items.item_Count] = { "Player 1", &player.rectangle, PLAYER_TYPE, (char*)&player };
+    SetupDebugGuiData(&scene_Debug_Items.items[scene_Debug_Items.item_Count]);
+    ++scene_Debug_Items.item_Count;
+
+    Debug_Items gui_Debug_Items = {0};
+    gui_Debug_Items.item_Count = 0;
+    gui_Debug_Items.item_Hover = -1;
+    gui_Debug_Items.item_Selected = -1;
+
+    // &temp_Gui.gui_Window.open_Size
+    gui_Debug_Items.items[gui_Debug_Items.item_Count] = { "Gui Window",  &temp_Gui.gui_Window.rectangle, WINDOW_TYPE, (char*)&temp_Gui.gui_Window };
+    SetupDebugGuiData(&gui_Debug_Items.items[gui_Debug_Items.item_Count]);
+    ++gui_Debug_Items.item_Count;
+    // &editor_Window.open_Size
+    gui_Debug_Items.items[gui_Debug_Items.item_Count] = { "Editor Window", &editor_Window.rectangle, WINDOW_TYPE, (char*)&editor_Window };
+    SetupDebugGuiData(&gui_Debug_Items.items[gui_Debug_Items.item_Count]);
+    ++gui_Debug_Items.item_Count;
+
+    Color debug_Pink = {255, 0, 255, 255};
+    Color debug_Green = {0, 255, 0, 255};
+    Color debug_Yellow = {0, 255, 255, 255};
+    int debug_Line_Size = 2;
+
+    Debug_Item *active_Item = 0;//&scene_Debug_Items.items[scene_Debug_Items.item_Selected];
+    Vector2 active_Test = {0};
+
+    Vector2 hot_Spots[4] = {0};
+    int hot_Spot_Count = 4;
+    float hot_Spot_Size = 5.0f;
+
+    bool isMouseLeftPressed = false;
+    bool isMouseLeftReleased = false;
 
     // Main game loop
     while (!WindowShouldClose()) 
     {
         float deltaTime = GetFrameTime();
-        
-        UpdatePlayer(&player, walls, walls_Length, deltaTime);
-        player.rectangle.x = player.position.x - 20;
-        player.rectangle.y = player.position.y - 40;
 
-        camera.zoom += ((float)GetMouseWheelMove()*0.05f);
-        
-        if (camera.zoom > 3.0f)
+        // detect input
+        //----------------------------------------------------------------------------------
+        if(IsKeyPressed(KEY_E)) // TOGGLE CONTROL MODE
         {
-            camera.zoom = 3.0f;
+            if((game_State.editor_Control_Settings == EDITOR_CONTROL_EDIT))
+            {
+                game_State.editor_Control_Settings = EDITOR_CONTROL_PLAY;
+            }
+            else
+            {
+                game_State.editor_Control_Settings = EDITOR_CONTROL_EDIT;
+            }
         }
-        else if (camera.zoom < 0.25f)
+
+        if(IsKeyPressed(KEY_R)) // RESET THE LEVEL
         {
-            camera.zoom = 0.25f;
-        }
-        
-        if(IsKeyPressed(KEY_R)) 
-        {
+            game_State.editor_Control_Settings = EDITOR_CONTROL_EDIT;
             camera.zoom = 1.0f;
             player.position = { 400.0f, 280.0f };
         }
 
-        UpdateCameraPlayerBoundsPush(&camera, &player, walls, walls_Length, deltaTime, system_State.screen_Width, system_State.screen_Height);
+        if((game_State.editor_Control_Settings == EDITOR_CONTROL_EDIT))
+        {
+            if(IsKeyPressed(KEY_Q)) // TOGGLE EDIT MODE
+            {
+                if(game_State.editor_Mode_Settings == EDITOR_MODE_GAME)
+                {
+                    game_State.editor_Mode_Settings = EDITOR_MODE_UI;
+                }
+                else
+                {
+                    game_State.editor_Mode_Settings = EDITOR_MODE_GAME;
+                }
+            }
 
-        // window
-        //----------------------------------------------------------------------------------
+            if(IsKeyPressed(KEY_ESCAPE))
+            {
+                temp_Gui.showMessageBox = !temp_Gui.showMessageBox;
+                CloseWindow();
+            }
+
+            // Update Debug Menu
+            if(IsKeyPressed('`') && IsKeyDown(KEY_LEFT_SHIFT))
+            {
+                debug_Window.alive = !debug_Window.alive;
+            }
+            if(IsKeyPressed(KEY_UP))
+            {
+                if(debug_Window.command_Count > 0)
+                {
+                    TextCopy(debug_Window.activeTextBox, debug_Window.previousTextBox);
+                }
+            }
+        }
+
+        isMouseLeftPressed = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+        isMouseLeftReleased = IsMouseButtonReleased(MOUSE_LEFT_BUTTON);
 
         //mousePosition = GetMousePosition();
         lastGesture = currentGesture;
         currentGesture = GetGestureDetected();
         touchPosition = GetTouchPosition(0);
+        Vector2 screen_Space_Touch_Position = GetScreenToWorld2D(touchPosition, camera);
 
-        int char_Pressed = GetCharPressed();
-        if(KEY_TILDA == char_Pressed)
-        {
-            debug_Window.alive = !debug_Window.alive;
-        }
+        // update
+        //----------------------------------------------------------------------------------
+        UpdatePlayer(&player, walls, walls_Length, deltaTime);
+        player.rectangle.x = player.position.x - 20;
+        player.rectangle.y = player.position.y - 40;
+        UpdateCameraPlayerBoundsPush(&camera, &player, walls, walls_Length, deltaTime, system_State.screen_Width, system_State.screen_Height);
 
-        if(IsKeyPressed(KEY_ENTER))
-        {
-            if(debug_Window.command_Count < 10)
+        // Have second camera for zooming out
+        // draw rect for original camera
+
+        scene_Debug_Items.item_Hover = -1;
+        gui_Debug_Items.item_Hover = -1;
+
+        // if(game_State.editor_Control_Settings == EDITOR_CONTROL_PLAY)
+        // {
+        // }
+        // else if(game_State.editor_Control_Settings == EDITOR_CONTROL_EDIT)
+        // {
+            camera.zoom += ((float)GetMouseWheelMove()*0.05f);
+            if (camera.zoom > 3.0f)
             {
-                //TextCopy(debug_Window.previousTextBox, debug_Window.activeTextBox);
-                ++debug_Window.command_Count;
-                debug_Window.previousTextBox = debug_Window.allTextBox[debug_Window.command_Count+1];
-                debug_Window.activeTextBox = debug_Window.allTextBox[debug_Window.command_Count];
+                camera.zoom = 3.0f;
             }
-        }
-        
-        if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
-        {
-            if(CheckCollisionPointRec(touchPosition, { gui_Window.rectangle.x, gui_Window.rectangle.y, gui_Window.rectangle.width, 20.0f }))
+            else if (camera.zoom < 0.25f)
             {
-                panOffset.x = touchPosition.x - gui_Window.rectangle.x;
-                panOffset.y = touchPosition.y - gui_Window.rectangle.y;
+                camera.zoom = 0.25f;
+            }
+
+            //find the item a mouse is over
+            if(game_State.editor_Mode_Settings == EDITOR_MODE_GAME)
+            {
+                for(int i = 0; i < scene_Debug_Items.item_Count; ++i)
+                {
+                    if(CheckCollisionPointRec(screen_Space_Touch_Position, *scene_Debug_Items.items[i].rect))
+                    {
+                        active_Test = screen_Space_Touch_Position;
+                        scene_Debug_Items.item_Hover = i;
+                    }
+                }
+            }
+            else if(game_State.editor_Mode_Settings == EDITOR_MODE_UI)
+            {
+                for(int i = 0; i < gui_Debug_Items.item_Count; ++i)
+                {
+                    if(CheckCollisionPointRec(touchPosition, *gui_Debug_Items.items[i].rect))
+                    {
+                        active_Test = touchPosition;
+                        gui_Debug_Items.item_Hover = i;
+                    }
+                }
+            }
+        // }
+
+        
+        if(active_Item)
+        {
+            active_Rect = *active_Item->rect;
+
+            hot_Spots[0] = {active_Rect.x, active_Rect.y};
+            hot_Spots[1] = {active_Rect.x + active_Rect.width, active_Rect.y};
+            hot_Spots[2] = {active_Rect.x, active_Rect.y + active_Rect.height};
+            hot_Spots[3] = {active_Rect.x + active_Rect.width, active_Rect.y + active_Rect.height};
+        }
+
+        if(isMouseLeftPressed)
+        {
+            if(CheckCollisionPointRec(touchPosition, { editor_Window.rectangle.x, editor_Window.rectangle.y, editor_Window.rectangle.width, 20.0f }))
+            {
+                panOffset.x = touchPosition.x - editor_Window.rectangle.x;
+                panOffset.y = touchPosition.y - editor_Window.rectangle.y;
 
                 if(currentGesture == GESTURE_DOUBLETAP)
                 {
-                    collapseWindow = !collapseWindow;
+                    editor_Window.open = !editor_Window.open;
                 }
 
                 if(currentGesture == GESTURE_TAP)
                 {
-                    dragWindow = true;
+                    editor_Window.drag = true;
+                }
+            }
+            else if(CheckCollisionPointRec(touchPosition, { temp_Gui.gui_Window.rectangle.x, temp_Gui.gui_Window.rectangle.y, temp_Gui.gui_Window.rectangle.width, 20.0f }))
+            {
+                panOffset.x = touchPosition.x - temp_Gui.gui_Window.rectangle.x;
+                panOffset.y = touchPosition.y - temp_Gui.gui_Window.rectangle.y;
+
+                if(currentGesture == GESTURE_DOUBLETAP)
+                {
+                    temp_Gui.gui_Window.open = !temp_Gui.gui_Window.open;
+                }
+
+                if(currentGesture == GESTURE_TAP)
+                {
+                    temp_Gui.gui_Window.drag = true;
                 }
             }
 
-            // Convert to screen space
-            if(CheckCollisionPointRec(touchPosition, player.rectangle))
-            {
-                panOffset.x = touchPosition.x - player.rectangle.x;
-                panOffset.y = touchPosition.y - player.rectangle.y;
 
+            if(CheckCollisionPointCircle(active_Test, hot_Spots[3], hot_Spot_Size))
+            {
+            }
+            else
+            {
+                active_Item = 0;
+
+                if(!CheckCollisionPointRec(touchPosition, editor_Window.rectangle))
+                {
+                    scene_Debug_Items.item_Selected = scene_Debug_Items.item_Hover;
+                    gui_Debug_Items.item_Selected = gui_Debug_Items.item_Hover;
+                    if(scene_Debug_Items.item_Selected > -1)
+                    {
+                        active_Item = &scene_Debug_Items.items[scene_Debug_Items.item_Selected];
+                    }
+                    else if(gui_Debug_Items.item_Selected > -1)
+                    {
+                        active_Item = &gui_Debug_Items.items[gui_Debug_Items.item_Selected];
+                    }
+                }
+            }
+
+            if(active_Item && CheckCollisionPointRec(screen_Space_Touch_Position, *active_Item->rect))
+            {
                 if(currentGesture == GESTURE_TAP)
                 {
                     drag_Player = true;
+                    drag_Offset = {screen_Space_Touch_Position.x - active_Item->rect->x, screen_Space_Touch_Position.y - active_Item->rect->y};
                 }
             }
         }
 
-        if(dragWindow)
-        {            
-            gui_Window.rectangle.x = (touchPosition.x - panOffset.x);
-            gui_Window.rectangle.y = (touchPosition.y - panOffset.y);
+        if(temp_Gui.gui_Window.drag)
+        {
+            temp_Gui.gui_Window.rectangle.x = (touchPosition.x - panOffset.x);
+            temp_Gui.gui_Window.rectangle.y = (touchPosition.y - panOffset.y);
             
-            if(IsMouseButtonReleased(MOUSE_LEFT_BUTTON))
+            if(isMouseLeftReleased)
             {
-                dragWindow = false;
+                temp_Gui.gui_Window.drag = false;
             }
         }
 
-        if(drag_Player)
+        if(editor_Window.drag) 
         {
-            player.position.x = (touchPosition.x - panOffset.x);
-            player.position.y = (touchPosition.y - panOffset.y);
-
-            if(IsMouseButtonReleased(MOUSE_LEFT_BUTTON))
+            editor_Window.rectangle.x = (touchPosition.x - panOffset.x);
+            editor_Window.rectangle.y = (touchPosition.y - panOffset.y);
+            
+            if(isMouseLeftReleased)
             {
-                drag_Player = false;
+                editor_Window.drag = false;
             }
         }
 
-        if(CheckCollisionPointRec(touchPosition, gui_Window.rectangle) && !collapseWindow &&
-            CheckCollisionPointRec(touchPosition, { gui_Window.rectangle.x + gui_Window.rectangle.width - window_Corner, gui_Window.rectangle.y + gui_Window.rectangle.height - window_Corner, window_Corner, window_Corner }))
+        // if(CheckCollisionPointRec(touchPosition, temp_Gui.gui_Window.rectangle) && temp_Gui.gui_Window.open &&
+        //     CheckCollisionPointRec(touchPosition, { temp_Gui.gui_Window.rectangle.x + temp_Gui.gui_Window.rectangle.width - window_Corner, temp_Gui.gui_Window.rectangle.y + temp_Gui.gui_Window.rectangle.height - window_Corner, window_Corner, window_Corner }))
+        // {
+        //     mouseScaleReady = true;
+        //     if(isMouseLeftPressed)
+        //     {
+        //         mouseScaleMode = true;
+        //     }
+        // }
+        // else
+        // {
+        //     mouseScaleReady = false;
+        // }
+
+        // if(mouseScaleMode)
+        // {
+        //     mouseScaleReady = true;
+
+        //     temp_Gui.gui_Window.open_Size.x = (touchPosition.x - temp_Gui.gui_Window.rectangle.x);
+        //     temp_Gui.gui_Window.open_Size.y = (touchPosition.y - temp_Gui.gui_Window.rectangle.y);
+
+        //     if(temp_Gui.gui_Window.open_Size.x < window_Corner)
+        //     {
+        //         temp_Gui.gui_Window.open_Size.x = window_Corner;
+        //     }
+
+        //     if(temp_Gui.gui_Window.open_Size.y < window_Corner)
+        //     {
+        //         temp_Gui.gui_Window.open_Size.y = window_Corner;
+        //     }
+
+        //     if(isMouseLeftReleased)
+        //     {
+        //         mouseScaleMode = false;
+        //     }
+        // }
+
+        if(active_Item)
         {
-            mouseScaleReady = true;
-            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+            active_Rect = *active_Item->rect;
+
+            hot_Spots[0] = {active_Rect.x, active_Rect.y};
+            hot_Spots[1] = {active_Rect.x + active_Rect.width, active_Rect.y};
+            hot_Spots[2] = {active_Rect.x, active_Rect.y + active_Rect.height};
+            hot_Spots[3] = {active_Rect.x + active_Rect.width, active_Rect.y + active_Rect.height};
+
+            if(CheckCollisionPointCircle(active_Test, hot_Spots[3], hot_Spot_Size))
             {
-                mouseScaleMode = true;
+                active_ScaleReady = true;
+                if (isMouseLeftPressed)
+                {
+                    active_ScaleMode = true;
+                }
             }
+            else
+            {
+                active_ScaleReady = false;
+            }
+
+            if(drag_Player && !active_ScaleMode)
+            {
+                //player.position.x = active_Test.x;
+                //player.position.y = active_Test.y;
+                MoveEntityData(active_Item, {active_Test.x - drag_Offset.x, active_Test.y - drag_Offset.y});
+
+                if(isMouseLeftReleased)
+                {
+                    drag_Player = false;
+                }
+            }
+
+            if(active_ScaleMode)
+            {
+                active_ScaleReady = true;
+
+                active_Rect.width = (active_Test.x - active_Rect.x);
+                active_Rect.height = (active_Test.y - active_Rect.y);
+
+                if(active_Rect.width < 0.0f)
+                {
+                    active_Rect.width = 0.0f;
+                }
+                if(active_Rect.height < 0.0f)
+                {
+                    active_Rect.height = 0.0f;
+                }
+
+                *active_Item->rect = active_Rect;
+
+                if(isMouseLeftReleased)
+                {
+                    active_ScaleMode = false;
+                    drag_Player = false;
+                }
+            }
+        }
+
+        if(temp_Gui.gui_Window.open)
+        {
+            temp_Gui.gui_Window.rectangle.width = temp_Gui.gui_Window.open_Size.x;
+            temp_Gui.gui_Window.rectangle.height = temp_Gui.gui_Window.open_Size.y;
         }
         else
         {
-            mouseScaleReady = false;
+            temp_Gui.gui_Window.rectangle.height = 1.0f;
         }
 
-        if(mouseScaleMode)
+        if(editor_Window.open)
         {
-            mouseScaleReady = true;
-
-            open_Size.x = (touchPosition.x - gui_Window.rectangle.x);
-            open_Size.y = (touchPosition.y - gui_Window.rectangle.y);
-
-            if(open_Size.x < window_Corner)
-            {
-                open_Size.x = window_Corner;
-            }
-
-            if(open_Size.y < window_Corner)
-            {
-                open_Size.y = window_Corner;
-            }
-
-            if(IsMouseButtonReleased(MOUSE_LEFT_BUTTON))
-            {
-                mouseScaleMode = false;
-            }
-        }
-
-        if(collapseWindow)
-        {
-            gui_Window.rectangle.height = 1.0f;
+            editor_Window.rectangle.width = editor_Window.open_Size.x;
+            editor_Window.rectangle.height = editor_Window.open_Size.y;
         }
         else
         {
-            gui_Window.rectangle.width = open_Size.x;
-            gui_Window.rectangle.height = open_Size.y;
+            editor_Window.rectangle.height = 1.0f;
         }
 
+        // draw
         //----------------------------------------------------------------------------------
-
 
         BeginDrawing();
 
@@ -326,142 +575,30 @@ int main(int argc, char** argv)
 
             BeginMode2D(camera);
            
-                for (int i = 0; i < walls_Length; i++)
+                for(int i = 0; i < walls_Length; i++)
                 {
-                    DrawRectangleRec(walls[i].rect, walls[i].color);
+                    DrawRectangleRec(walls[i].rectangle, walls[i].color);
                 }
 
-                DrawRectangleRec(player.rectangle, colorPickerValue);
+                DrawRectangleRec(player.rectangle, temp_Gui.colorPickerValue);
                
             EndMode2D();
 
-            // exitNewWindow = GuiWindowBox(gui_Window.rectangle, "#198# Controls Window");
-            // if(!collapseWindow)
-            // {
-            //     const char* mouse_Position_Text = TextFormat("- Mouse Position: [ %.0f, %.0f ]", touchPosition.x, touchPosition.y);
-            //     float text_Height = 20.0f * 3.0f;
-            //     GuiLabel({ gui_Window.rectangle.x + 20.0f, gui_Window.rectangle.y + 20.0f, gui_Window.rectangle.width - 20.0f, text_Height }, "Mouse Info:");
-            //     GuiLabel({ gui_Window.rectangle.x + 40.0f, gui_Window.rectangle.y + 40.0f, gui_Window.rectangle.width - 20.0f, text_Height }, "- Mouse Wheel to Zoom in-out, R to reset zoom");
-            //     GuiLabel({ gui_Window.rectangle.x + 40.0f, gui_Window.rectangle.y + 60.0f, gui_Window.rectangle.width - 20.0f, text_Height }, mouse_Position_Text);
-            // }
+            if(mouseScaleMode) GuiLock();
+            DrawTempGui(&temp_Gui);
+            if(mouseScaleMode) GuiUnlock();
 
-            guiNewWindow = GuiWindowBox(gui_Window.rectangle, gui_Window.title);
-            //guiWindowScrollIndex
-            if(!collapseWindow)
+            editor_Window.clicked - GuiWindowBox(editor_Window.rectangle, editor_Window.title);
+            if(editor_Window.open)
             {
-                // NOTE: View rectangle could be used to perform some scissor test
-                Rectangle view = GuiScrollPanel( { gui_Window.rectangle.x + 5.0f, gui_Window.rectangle.y + WINDOW_STATUSBAR_HEIGHT + 2, gui_Window.rectangle.width - 10.0f, gui_Window.rectangle.height - 7.0f - WINDOW_STATUSBAR_HEIGHT}, { gui_Window.rectangle.x + 5.0f, gui_Window.rectangle.y + WINDOW_STATUSBAR_HEIGHT + 2, GetScreenWidth(), GetScreenHeight() }, &viewScroll);
-                
-                //BeginScissorMode((int)(gui_Window.rectangle.x + 5.0f), (int)(gui_Window.rectangle.y + WINDOW_STATUSBAR_HEIGHT + 2.0f), (int)(gui_Window.rectangle.width - 10.0f), (int)(gui_Window.rectangle.height - 7.0f - WINDOW_STATUSBAR_HEIGHT));
-                BeginScissorMode((int)view.x, (int)view.y, (int)view.width, (int)view.height);
-
-
-                // raygui: controls drawing
-                //----------------------------------------------------------------------------------
-                if(dropDown000EditMode || dropDown001EditMode)
+                if(scene_Debug_Items.item_Selected > -1)
                 {
-                    GuiLock();
+                    DebugEditor(&editor_Window, &scene_Debug_Items.items[scene_Debug_Items.item_Selected]);
                 }
-
-                // First GUI column
-                forceSquaredChecked = GuiCheckBox({ view.x + 25, view.y + 108, 15, 15 }, "FORCE CHECK!", forceSquaredChecked);
-
-                GuiSetStyle(TEXTBOX, TEXT_ALIGNMENT, GUI_TEXT_ALIGN_CENTER);
-                if (GuiSpinner({ view.x + 25,  view.y + 135, 125, 30 }, NULL, &spinner001Value, 0, 100, spinnerEditMode))
+                else if(gui_Debug_Items.item_Selected > -1)
                 {
-                    spinnerEditMode = !spinnerEditMode;
+                    DebugEditor(&editor_Window, &gui_Debug_Items.items[gui_Debug_Items.item_Selected]);
                 }
-                if (GuiValueBox({ view.x + 25,  view.y + 175, 125, 30 }, NULL, &valueBox002Value, 0, 100, valueBoxEditMode))
-                {
-                    valueBoxEditMode = !valueBoxEditMode;
-                }
-
-                GuiSetStyle(TEXTBOX, TEXT_ALIGNMENT, GUI_TEXT_ALIGN_LEFT);
-                if (GuiTextBox({ view.x + 25,  view.y + 215, 125, 30 }, textBoxText, 64, textBoxEditMode))
-                {
-                    textBoxEditMode = !textBoxEditMode;
-                }
-
-                GuiSetStyle(BUTTON, TEXT_ALIGNMENT, GUI_TEXT_ALIGN_CENTER);
-
-                if (GuiButton({ view.x + 25,  view.y + 255, 125, 30 }, GuiIconText(RICON_FILE_SAVE, "Save File")))
-                {
-                    showTextInputBox = true;
-                }
-
-                GuiGroupBox({ view.x + 25,  view.y + 310, 125, 150 }, "STATES");
-                GuiLock();
-                    GuiSetState(GUI_STATE_NORMAL); if(GuiButton({ view.x + 30,  view.y + 320, 115, 30 }, "NORMAL")) { }
-                    GuiSetState(GUI_STATE_FOCUSED); if (GuiButton({ view.x + 30,  view.y + 355, 115, 30 }, "FOCUSED")) { }
-                    GuiSetState(GUI_STATE_PRESSED); if (GuiButton({ view.x + 30,  view.y + 390, 115, 30 }, "#15#PRESSED")) { }
-                    GuiSetState(GUI_STATE_DISABLED); if (GuiButton({ view.x + 30,  view.y + 425, 115, 30 }, "DISABLED")) { }
-                    GuiSetState(GUI_STATE_NORMAL);
-                GuiUnlock();
-
-                comboBoxActive = GuiComboBox({ view.x + 25,  view.y + 470, 125, 30 }, "ONE;TWO;THREE;FOUR", comboBoxActive);
-
-                // NOTE: GuiDropdownBox must draw after any other control that can be covered on unfolding
-                GuiSetStyle(DROPDOWNBOX, TEXT_ALIGNMENT, GUI_TEXT_ALIGN_LEFT);
-                if (GuiDropdownBox({ view.x + 25, view.y + 65, 125, 30 }, "#01#ONE;#02#TWO;#03#THREE;#04#FOUR", &dropdownBox001Active, dropDown001EditMode))
-                {
-                    dropDown001EditMode = !dropDown001EditMode;
-                }
-
-                GuiSetStyle(DROPDOWNBOX, TEXT_ALIGNMENT, GUI_TEXT_ALIGN_CENTER);
-                if(GuiDropdownBox({ view.x + 25,  view.y + 25, 125, 30 }, "ONE;TWO;THREE", &dropdownBox000Active, dropDown000EditMode))
-                {
-                    dropDown000EditMode = !dropDown000EditMode;
-                }
-
-                // Second GUI column
-                listViewActive = GuiListView({ view.x + 165, view.y + 25, 140, 140 }, "Charmander;Bulbasaur;#18#Squirtel;Pikachu;Eevee;Pidgey", &listViewScrollIndex, listViewActive);
-                listViewExActive = GuiListViewEx({ view.x + 165, view.y + 180, 140, 200 }, listViewExList, 8, &listViewExFocus, &listViewExScrollIndex, listViewExActive);
-
-                toggleGroupActive = GuiToggleGroup({ view.x + 165, view.y + 400, 140, 25 }, "#1#ONE\n#3#TWO\n#8#THREE\n#23#", toggleGroupActive);
-
-                // Third GUI column
-                if (GuiTextBoxMulti({ view.x + 320, view.y + 25, 225, 140 }, multiTextBoxText, 256, multiTextBoxEditMode))
-                {
-                    multiTextBoxEditMode = !multiTextBoxEditMode;
-                }
-                colorPickerValue = GuiColorPicker({ view.x + 320, view.y + 185, 196, 192 }, colorPickerValue);
-
-                sliderValue = GuiSlider({ view.x + 355, view.y + 400, 165, 20 }, "TEST", TextFormat("%2.2f", (float)sliderValue), sliderValue, -50, 100);
-                sliderBarValue = GuiSliderBar({ view.x + 320, view.y + 430, 200, 20 }, NULL, TextFormat("%i", (int)sliderBarValue), sliderBarValue, 0, 100);
-                progressValue = GuiProgressBar({ view.x + 320, view.y + 460, 200, 20 }, NULL, NULL, progressValue, 0, 1);
-                alphaValue = GuiColorBarAlpha({ view.x + 320, view.y + 490, 200, 30 }, alphaValue);
-
-                GuiStatusBar({ view.x, view.y + view.height - 20.0f, view.x + view.width, 20.0f }, "This is a status bar");
-
-                if (showMessageBox)
-                {
-                    DrawRectangle(view.x, view.y, view.width, view.height, Fade(RAYWHITE, 0.8f));
-                    int result = GuiMessageBox({ view.x + view.width/2 - 125, view.y + view.height/2 - 50, 250, 100 }, GuiIconText(RICON_EXIT, "Close Window"), "Do you really want to exit?", "Yes;No");
-
-                    if ((result == 0) || (result == 2)) showMessageBox = false;
-                    else if (result == 1) exitWindow = true;
-                }
-
-                if (showTextInputBox)
-                {
-                    DrawRectangle(view.x, view.y, view.width, view.height, Fade(RAYWHITE, 0.8f));
-                    int result = GuiTextInputBox({ view.x + view.width/2 - 120, view.y + view.height/2 - 60, 240, 140 }, GuiIconText(RICON_FILE_SAVE, "Save file as..."), "Introduce a save file name", "Ok;Cancel", textInput);
-
-                    if(result == 1)
-                    {
-                        // TODO: Validate textInput value and save
-                        strcpy(textInputFileName, textInput);
-                    }
-
-                    if ((result == 0) || (result == 1) || (result == 2))
-                    {
-                        showTextInputBox = false;
-                        strcpy(textInput, "\0");
-                    }
-                }
-
-                GuiUnlock();
-                EndScissorMode();
             }
 
             if(debug_Window.alive)
@@ -471,35 +608,123 @@ int main(int argc, char** argv)
                 debug_Window.window = {0.0f, 0.0f, (float)system_State.screen_Width, (float)system_State.screen_Height / 2.0f};
                 DrawRectangleRec(debug_Window.window, { 80, 80, 80, 255 });
 
+                // Font info
                 Font gui_Font = GuiGetFont();
                 const char* working_Directory = GetWorkingDirectory();
-                vec2 font_Size = MeasureTextEx(gui_Font, working_Directory, gui_Font.baseSize, 0);
-                Rectangle label_Rect = {debug_Window.window.x, debug_Window.window.y, debug_Window.window.width / 0.5f, font_Size.y};
+                Vector2 font_Size = MeasureTextEx(gui_Font, working_Directory, gui_Font.baseSize, 0);
 
+                // Path Label
                 GuiSetStyle(LABEL, TEXT_ALIGNMENT, GUI_TEXT_ALIGN_CENTER);
+                Rectangle label_Rect = {debug_Window.window.x, debug_Window.window.y, debug_Window.window.width, font_Size.y};
                 GuiLabel(label_Rect, working_Directory);
 
+                // Text box
                 GuiSetStyle(TEXTBOX, TEXT_ALIGNMENT, GUI_TEXT_ALIGN_LEFT);
-                debug_Window.text_Box = {debug_Window.window.x + 10.0f, debug_Window.window.height - 10.0f - font_Size.y, debug_Window.window.width - 20.0f, font_Size.y + 10.0f};
-                //debug_Window.activeTextBox[0] = '>';
-                if(GuiTextBox(debug_Window.text_Box, debug_Window.activeTextBox, 64, debug_Window.textBoxEditMode))
+                debug_Window.text_Box = {debug_Window.window.x, debug_Window.window.height - 10.0f - font_Size.y, debug_Window.window.width, font_Size.y + 10.0f};
+                if(GuiCommandBox(debug_Window.text_Box, debug_Window.activeTextBox, 64, debug_Window.alive, &frame_Counter))
                 {
-                    debug_Window.textBoxEditMode = !debug_Window.textBoxEditMode;
+                    if(debug_Window.command_Count < 10)
+                    {
+                        //CopyString(debug_Window.activeTextBox, &command);
+                        TextCopy(command.chars, debug_Window.activeTextBox);
+
+                        // if((command.length > 0) &&  (command.string[0] == '>'))
+                        // {
+                        //     RemoveFront(&command);
+
+                        //     while((command.length > 0) && IsWhiteSpace(command.string[0]))
+                        //     {
+                        //         RemoveFront(&command);
+                        //     }
+
+                        //     while((command.length > 0) && !IsWhiteSpace(command.string[0]))
+                        //     {
+                        //         AddChar(&token, command.string[0]);
+                        //         RemoveFront(&command);
+                        //     }
+                        // }
+
+                        if((command.char_Length > 0) &&  (command.chars[0] == '>'))
+                        {
+                            RemoveFront(&command);
+
+                            while((command.char_Length > 0) && IsWhiteSpace(&command))
+                            {
+                                RemoveFront(&command);
+                            }
+
+                            while((command.char_Length > 0) && !IsWhiteSpace(&command))
+                            {
+                                AddChar(&token, command.chars[0]);
+                                RemoveFront(&command);
+                            }
+                        }
+
+                        ++debug_Window.command_Count;
+                        debug_Window.previousTextBox = debug_Window.allTextBox[debug_Window.command_Count-1];
+                        debug_Window.activeTextBox = debug_Window.allTextBox[debug_Window.command_Count];
+                        debug_Window.activeTextBox[0] = '>';
+                    }
                 }
 
-                // GuiSetStyle(LABEL, TEXT_ALIGNMENT, GUI_TEXT_ALIGN_CENTER);
-                // for(int i = 1; i < debug_Window.command_Count; ++i)
-                // {
-                //     Rectangle label_OldCommand = {debug_Window.window.x, debug_Window.window.y + debug_Window.window.height - font_Size.y * (i - 1), debug_Window.window.width, debug_Window.window.height - font_Size.y * i};
-                //     GuiLabel(label_OldCommand, debug_Window.allTextBox[i]);
-                // }
-                
+                GuiSetStyle(LABEL, TEXT_ALIGNMENT, GUI_TEXT_ALIGN_LEFT);
+                for(int i = 0; i < debug_Window.command_Count; ++i)
+                {
+                    float step1 = debug_Window.command_Count - i;
+                    float step2 = step1 + 1;
+                    Rectangle label_OldCommand = {debug_Window.window.x, debug_Window.window.height - 10.0f * step2 - font_Size.y * step2, debug_Window.window.width, font_Size.y * step1 - 10.0f * step1};
+                    GuiLabel(label_OldCommand, debug_Window.allTextBox[i]);
+                }
                 //GuiUnlock();
             }
 
+            if(game_State.editor_Mode_Settings == EDITOR_MODE_GAME)
+            {
+                BeginMode2D(camera);
+                // for(int i = 0; i < scene_Debug_Items.item_Count; ++i)
+                // {
+                //     DrawRectangleLinesEx(*scene_Debug_Items.items[i].rect, debug_Line_Size, YELLOW);
+                //     DrawLineEx({scene_Debug_Items.items[i].rect->x, scene_Debug_Items.items[i].rect->y}, {scene_Debug_Items.items[i].rect->x + scene_Debug_Items.items[i].rect->width, scene_Debug_Items.items[i].rect->y + scene_Debug_Items.items[i].rect->height}, debug_Line_Size, YELLOW);
+                // }
+                if(scene_Debug_Items.item_Hover > -1)
+                {
+                    DrawRectangleLinesEx(*scene_Debug_Items.items[scene_Debug_Items.item_Hover].rect, debug_Line_Size, debug_Green);
+                    DrawLineEx({scene_Debug_Items.items[scene_Debug_Items.item_Hover].rect->x, scene_Debug_Items.items[scene_Debug_Items.item_Hover].rect->y}, {scene_Debug_Items.items[scene_Debug_Items.item_Hover].rect->x + scene_Debug_Items.items[scene_Debug_Items.item_Hover].rect->width, scene_Debug_Items.items[scene_Debug_Items.item_Hover].rect->y + scene_Debug_Items.items[scene_Debug_Items.item_Hover].rect->height}, debug_Line_Size, debug_Green);
+                }
+
+                if(scene_Debug_Items.item_Selected > -1)
+                {
+                    DrawCircleV(hot_Spots[0], hot_Spot_Size, YELLOW);
+                    DrawCircleV(hot_Spots[1], hot_Spot_Size, YELLOW);
+                    DrawCircleV(hot_Spots[2], hot_Spot_Size, YELLOW);
+                    DrawCircleV(hot_Spots[3], hot_Spot_Size, YELLOW);
+                    DrawRectangleLinesEx(*scene_Debug_Items.items[scene_Debug_Items.item_Selected].rect, debug_Line_Size, debug_Yellow);
+                    DrawLineEx({scene_Debug_Items.items[scene_Debug_Items.item_Selected].rect->x, scene_Debug_Items.items[scene_Debug_Items.item_Selected].rect->y}, {scene_Debug_Items.items[scene_Debug_Items.item_Selected].rect->x + scene_Debug_Items.items[scene_Debug_Items.item_Selected].rect->width, scene_Debug_Items.items[scene_Debug_Items.item_Selected].rect->y + scene_Debug_Items.items[scene_Debug_Items.item_Selected].rect->height}, debug_Line_Size, debug_Yellow);
+                }
+                EndMode2D();
+            }
+            else if(game_State.editor_Mode_Settings == EDITOR_MODE_UI)
+            {
+                if(gui_Debug_Items.item_Hover > -1)
+                {
+                    DrawRectangleLinesEx(*gui_Debug_Items.items[gui_Debug_Items.item_Hover].rect, debug_Line_Size, debug_Green);
+                    DrawLineEx({gui_Debug_Items.items[gui_Debug_Items.item_Hover].rect->x, gui_Debug_Items.items[gui_Debug_Items.item_Hover].rect->y}, {gui_Debug_Items.items[gui_Debug_Items.item_Hover].rect->x + gui_Debug_Items.items[gui_Debug_Items.item_Hover].rect->width, gui_Debug_Items.items[gui_Debug_Items.item_Hover].rect->y + gui_Debug_Items.items[gui_Debug_Items.item_Hover].rect->height}, debug_Line_Size, debug_Green);
+                }
+
+                if(gui_Debug_Items.item_Selected > -1)
+                {
+                    DrawCircleV(hot_Spots[0], hot_Spot_Size, YELLOW);
+                    DrawCircleV(hot_Spots[1], hot_Spot_Size, YELLOW);
+                    DrawCircleV(hot_Spots[2], hot_Spot_Size, YELLOW);
+                    DrawCircleV(hot_Spots[3], hot_Spot_Size, YELLOW);
+                    DrawRectangleLinesEx(*gui_Debug_Items.items[gui_Debug_Items.item_Selected].rect, debug_Line_Size, debug_Yellow);
+                    DrawLineEx({gui_Debug_Items.items[gui_Debug_Items.item_Selected].rect->x, gui_Debug_Items.items[gui_Debug_Items.item_Selected].rect->y}, {gui_Debug_Items.items[gui_Debug_Items.item_Selected].rect->x + gui_Debug_Items.items[gui_Debug_Items.item_Selected].rect->width, gui_Debug_Items.items[gui_Debug_Items.item_Selected].rect->y + gui_Debug_Items.items[gui_Debug_Items.item_Selected].rect->height}, debug_Line_Size, debug_Yellow);
+                }
+            }
+
+            //DEBUG_DrawLines();
+
             DrawFPS(system_State.screen_Width - 90, system_State.screen_Height - 30);
-            
-            DEBUG_DrawLines();
 
         EndDrawing();
         //----------------------------------------------------------------------------------

@@ -560,7 +560,6 @@ typedef enum {
 
     // Function keys
     KEY_SPACE           = 32,
-    KEY_TILDA           = 126,
     KEY_ESCAPE          = 256,
     KEY_ENTER           = 257,
     KEY_TAB             = 258,
